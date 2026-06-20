@@ -155,8 +155,6 @@ public partial class BlazorHostWindow : Window, IBlazorWindow
         var baseUrl = _blazorHost.BaseUrl;
         _logger?.LogVerbose("Blazor server URL: {BaseUrl}", baseUrl);
 
-        await WaitForServerReady(baseUrl);
-
         // Transition splash → real window, or apply sizing when no splash was used
         var splashConfig = _options?.SplashScreen;
         if (splashConfig?.Enabled == true)
@@ -243,35 +241,6 @@ public partial class BlazorHostWindow : Window, IBlazorWindow
 
         _logger?.LogVerbose("NativeWebView created and all services wired up");
         Activate();
-    }
-
-    private async Task WaitForServerReady(string baseUrl)
-    {
-        using var httpClient = HttpClientFactory.CreateForServerCheck();
-
-        for (int i = 0; i < Constants.Defaults.ServerReadinessMaxAttempts; i++)
-        {
-            try
-            {
-                _logger?.LogVerbose($"Checking server readiness... attempt {i + 1}");
-                var response = await httpClient.GetAsync(baseUrl);
-                if (response.IsSuccessStatusCode)
-                {
-                    _logger?.LogVerbose("Server is ready!");
-                    await Task.Delay(Constants.Defaults.ServerStabilizationDelayMilliseconds);
-                    _logger?.LogVerbose("Server stabilization delay completed");
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogVerbose($"Server not ready yet: {ex.Message}");
-            }
-
-            await Task.Delay(Constants.Defaults.ServerReadinessCheckDelayMilliseconds);
-        }
-
-        _logger?.LogWarning("Warning: Server readiness check failed, proceeding anyway...");
     }
 
     /// <summary>

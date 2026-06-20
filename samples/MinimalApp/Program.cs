@@ -1,4 +1,4 @@
-using CheapAvaloniaBlazor.Extensions;
+﻿using CheapAvaloniaBlazor.Extensions;
 
 namespace MinimalApp;
 
@@ -10,6 +10,7 @@ class Program
         var builder = new CheapAvaloniaBlazor.Hosting.HostBuilder()
             .WithTitle("Minimal App")
             .WithSize(1024, 768)
+            .WithAppComponent<App>()
             // Native app feel - no console window, no DevTools, no right-click menu
             .ConfigureOptions(options =>
             {

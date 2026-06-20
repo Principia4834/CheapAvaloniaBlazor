@@ -53,18 +53,8 @@ public class HostBuilder
     /// </summary>
     private void ConfigureDefaultServices()
     {
-        // Add logging
-        _services.AddLogging(logging =>
-        {
-            logging.SetMinimumLevel(LogLevel.Information);
-
-            if (_options.EnableConsoleLogging)
-            {
-                logging.AddConsole();
-            }
-
-            logging.AddDebug();
-        });
+        // Logging is configured lazily in BuildAvaloniaApp()/ConfigureServicesInternal() so that
+        // fluent options (e.g. EnableConsoleLogging()) set after construction are respected (B6).
 
         // Add CheapAvaloniaBlazor core services
         _services.AddCheapAvaloniaBlazor(_options);
@@ -532,6 +522,18 @@ public class HostBuilder
     }
 
     /// <summary>
+    /// Specify the root Blazor application component type explicitly.
+    /// Avoids the reflection-based assembly scan in <see cref="EmbeddedBlazorHostService"/> (B5).
+    /// </summary>
+    /// <typeparam name="TApp">The top-level Razor component (typically <c>App</c> in your project).</typeparam>
+    /// <returns>The builder for chaining</returns>
+    public HostBuilder WithAppComponent<TApp>() where TApp : Microsoft.AspNetCore.Components.IComponent
+    {
+        _options.AppComponentType = typeof(TApp);
+        return this;
+    }
+
+    /// <summary>
     /// Build the window with default type
     /// </summary>
     /// <returns>A configured BlazorHostWindow</returns>
@@ -591,7 +593,6 @@ public class HostBuilder
             return app;
         })
         .UsePlatformDetect()
-        .UseWin32()
         .UseSkia()
         .LogToTrace();
     }
@@ -605,6 +606,15 @@ public class HostBuilder
                 serviceCollection.Add(service);
             }
         };
+
+        // Defer logging registration so fluent options (e.g. EnableConsoleLogging) are honoured (B6).
+        _services.AddLogging(logging =>
+        {
+            logging.SetMinimumLevel(LogLevel.Information);
+            if (_options.EnableConsoleLogging)
+                logging.AddConsole();
+            logging.AddDebug();
+        });
 
         var serviceProvider = _services.BuildServiceProvider();
         CheapAvaloniaBlazorRuntime.Initialize(serviceProvider);
@@ -633,6 +643,15 @@ public class HostBuilder
             }
         };
 
+        // Defer logging registration so fluent options (e.g. EnableConsoleLogging) are honoured (B6).
+        _services.AddLogging(logging =>
+        {
+            logging.SetMinimumLevel(LogLevel.Information);
+            if (_options.EnableConsoleLogging)
+                logging.AddConsole();
+            logging.AddDebug();
+        });
+
         // Build the service provider
         var serviceProvider = _services.BuildServiceProvider();
 
@@ -643,16 +662,9 @@ public class HostBuilder
         _serviceProviderConfiguration?.Invoke(serviceProvider);
 
         // Create the window instance
-        var window = CreateWindow<T>(serviceProvider);
-
-        // Start the Blazor host asynchronously
-        _ = Task.Run(async () =>
-        {
-            var blazorHost = serviceProvider.GetRequiredService<IBlazorHostService>();
-            await blazorHost.SafeStartAsync<HostBuilder>(serviceProvider);
-        });
-
-        return window;
+        // BlazorHostWindow.InitializeWebView() starts the Blazor host when the window loads,
+        // so no fire-and-forget Task.Run is needed here (B9).
+        return CreateWindow<T>(serviceProvider);
     }
 
     /// <summary>

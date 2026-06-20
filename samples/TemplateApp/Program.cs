@@ -1,4 +1,4 @@
-using CheapAvaloniaBlazor.Extensions;
+﻿using CheapAvaloniaBlazor.Extensions;
 
 namespace TemplateApp;
 
@@ -10,6 +10,7 @@ class Program
         var builder = new CheapAvaloniaBlazor.Hosting.HostBuilder()
             .WithTitle("TemplateApp")
             .WithSize(1024, 768)
+            .WithAppComponent<App>()
             .ConfigureOptions(options =>
             {
                 options.EnableDevTools = false;

@@ -1,4 +1,4 @@
-@page "/_cheapblazor/window"
+﻿@page "/_cheapblazor/window"
 @using Microsoft.AspNetCore.Components
 @using Microsoft.Extensions.Logging
 @inject IWindowService WindowService
@@ -11,7 +11,7 @@
 }
 else if (!string.IsNullOrEmpty(_errorMessage))
 {
-    <p style="color: red; padding: 1rem;">@_errorMessage</p>
+    <MudAlert Severity="Severity.Error" Class="ma-4">@_errorMessage</MudAlert>
 }
 
 @code {

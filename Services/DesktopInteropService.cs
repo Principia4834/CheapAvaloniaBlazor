@@ -8,6 +8,8 @@ using Avalonia.Controls;
 using System.Text.Json;
 using CheapAvaloniaBlazor;
 
+namespace CheapAvaloniaBlazor.Services;
+
 public class DesktopInteropService : IDesktopInteropService
 {
     private readonly IJSRuntime _jsRuntime;
@@ -76,10 +78,17 @@ public class DesktopInteropService : IDesktopInteropService
 
     private Window? GetTopLevel()
     {
+        // Prefer the window that the WebViewMessageHandler is actually attached to.
+        // This is the correct owner for file pickers in multi-window apps and avoids
+        // always using MainWindow (which may be on a different monitor) (B14).
+        var attached = _messageHandler.GetHostWindow();
+        if (attached != null)
+            return attached;
+
+        // Fallback: use the desktop lifetime's main window if the handler has not been wired yet.
         if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-        {
             return desktop.MainWindow;
-        }
+
         return null;
     }
 

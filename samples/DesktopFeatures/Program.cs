@@ -1,4 +1,4 @@
-using CheapAvaloniaBlazor.Extensions;
+﻿using CheapAvaloniaBlazor.Extensions;
 using CheapAvaloniaBlazor.Models;
 
 namespace DesktopFeatures;
@@ -11,6 +11,7 @@ class Program
         var builder = new CheapAvaloniaBlazor.Hosting.HostBuilder()
             .WithTitle("Desktop Features Demo")
             .WithSize(1200, 800)
+            .WithAppComponent<App>()
             .ConfigureOptions(options =>
             {
                 options.EnableDevTools = true;

@@ -61,8 +61,9 @@ public static class WebApplicationExtensions
         app.MapStaticAssets();
 
         // Modern Blazor Web App pattern: MapRazorComponents<App>().AddInteractiveServerRenderMode()
-        // Centralized in BlazorComponentMapper to avoid reflection duplication
-        var appType = Utilities.BlazorComponentMapper.DiscoverAppType();
+        // Prefer the explicitly supplied AppComponentType (B5: avoids fragile reflection).
+        // Fall back to assembly scanning only when the consumer has not called WithAppComponent<TApp>().
+        var appType = options.AppComponentType ?? Utilities.BlazorComponentMapper.DiscoverAppType();
 
         if (appType != null)
         {

@@ -33,8 +33,13 @@ public class WebViewMessageHandler : IDisposable
         _webView = webView;
         _window = window;
         webView.WebMessageReceived += OnWebMessageReceived;
-        _logger?.LogInformation("WebViewMessageHandler attached to NativeWebView");
+        _logger?.LogDebug("WebViewMessageHandler attached to NativeWebView");
     }
+
+    /// <summary>
+    /// Returns the host window currently attached to this handler, or <c>null</c> if not yet attached.
+    /// </summary>
+    public Window? GetHostWindow() => _window;
 
     /// <summary>
     /// Register a custom message handler.
@@ -54,8 +59,9 @@ public class WebViewMessageHandler : IDisposable
 
         var message = JsonSerializer.Serialize(new { type = messageType, payload });
 
-        // InvokeScript must run on the UI thread
-        Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
+        // InvokeScript must run on the UI thread; InvokeAsync returns an awaitable task so
+        // exceptions are propagated rather than becoming unobserved (A6).
+        _ = Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
         {
             try
             {

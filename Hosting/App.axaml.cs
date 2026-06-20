@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using CheapAvaloniaBlazor.Configuration;
@@ -25,10 +25,6 @@ public partial class AvaloniaApp : Application
         _serviceProvider = serviceProvider;
         var loggerFactory = serviceProvider.GetRequiredService<IDiagnosticLoggerFactory>();
         _logger = loggerFactory.CreateLogger<AvaloniaApp>();
-
-        _logger.LogVerbose("=== AVALONIA APP INITIALIZE CALLED ===");
-        AvaloniaXamlLoader.Load(this);
-        _logger.LogVerbose("=== AVALONIA APP INITIALIZE COMPLETED ===");
     }
 
     public override void OnFrameworkInitializationCompleted()
@@ -51,7 +47,6 @@ public partial class AvaloniaApp : Application
 
             _logger?.LogVerbose("About to call window.Show()");
             // Explicitly show the window to trigger the Loaded event
-            // (Window is invisible and off-screen, but StorageProvider will be initialized)
             window.Show();
             _logger?.LogVerbose("window.Show() called - window is hidden but functional");
 

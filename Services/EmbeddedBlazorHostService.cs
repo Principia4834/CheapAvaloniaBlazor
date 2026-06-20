@@ -16,7 +16,7 @@ using System.Reflection;
 
 namespace CheapAvaloniaBlazor.Services;
 
-public class EmbeddedBlazorHostService : IBlazorHostService, IDisposable
+public class EmbeddedBlazorHostService : IBlazorHostService, IAsyncDisposable, IDisposable
 {
     private WebApplication? _app;
     private readonly CheapAvaloniaBlazorOptions _options;
@@ -168,18 +168,18 @@ public class EmbeddedBlazorHostService : IBlazorHostService, IDisposable
             ConfigurePipeline(_app);
 
             // Start the host
-            _logger.LogInformation("Starting Blazor host task...");
+            _logger.LogDebug("Starting Blazor host task...");
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    _logger.LogInformation("Running WebApplication.RunAsync...");
+                    _logger.LogDebug("Running WebApplication.RunAsync...");
                     await _app.RunAsync(_hostCts.Token);
-                    _logger.LogInformation("WebApplication.RunAsync completed");
+                    _logger.LogDebug("WebApplication.RunAsync completed");
                 }
                 catch (OperationCanceledException)
                 {
-                    _logger.LogInformation("Blazor host cancelled (expected)");
+                    _logger.LogDebug("Blazor host cancelled (expected)");
                 }
                 catch (Exception ex)
                 {
@@ -240,7 +240,7 @@ public class EmbeddedBlazorHostService : IBlazorHostService, IDisposable
                     // Increase timeouts for embedded scenarios where the WebView might be slower
                     circuitOptions.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(10);
                     circuitOptions.JSInteropDefaultCallTimeout = TimeSpan.FromMinutes(2);
-                    circuitOptions.DetailedErrors = true;
+                    circuitOptions.DetailedErrors = _options.EnableDiagnostics;
                 });
 
             // Add circuit error handler to capture detailed exceptions
@@ -253,8 +253,9 @@ public class EmbeddedBlazorHostService : IBlazorHostService, IDisposable
             // Add comprehensive diagnostics
             _diagnosticLogger.LogDiagnosticVerbose(Constants.Diagnostics.RazorComponentsAdded);
 
-            // Find and store the App component type for use in ConfigurePipeline (MapRazorComponents<App>)
-            _appType = Utilities.BlazorComponentMapper.DiscoverAppType();
+            // Prefer the explicitly supplied app-component type (B5: avoids fragile reflection).
+            // Fall back to assembly scanning when the consumer has not called WithAppComponent<TApp>().
+            _appType = _options.AppComponentType ?? Utilities.BlazorComponentMapper.DiscoverAppType();
 
             if (_appType != null)
             {
@@ -429,34 +430,38 @@ public class EmbeddedBlazorHostService : IBlazorHostService, IDisposable
                 _options.ConfigurePipeline.Invoke(app);
             }
 
-            // Add diagnostic middleware to log all requests
-            app.Use(async (context, next) =>
+            // Diagnostic request logging — only active when diagnostics are explicitly enabled (B4).
+            // Blazor Server emits dozens of SignalR requests per second; logging every one at
+            // Information floods structured sinks in all configurations.
+            if (_options.EnableDiagnostics)
             {
-                _logger.LogInformation($"{Constants.Diagnostics.Prefix} HTTP {{Method}} {{Path}} from {{RemoteIP}}",
-                    context.Request.Method,
-                    context.Request.Path,
-                    context.Connection.RemoteIpAddress);
+                app.Use(async (context, next) =>
+                {
+                    _logger.LogDebug($"{Constants.Diagnostics.Prefix} HTTP {{Method}} {{Path}} from {{RemoteIP}}",
+                        context.Request.Method,
+                        context.Request.Path,
+                        context.Connection.RemoteIpAddress);
 
-                // Log headers that might be relevant to Blazor
-                if (context.Request.Headers.ContainsKey(Constants.Http.ConnectionHeader))
-                {
-                    _logger.LogInformation($"{Constants.Diagnostics.Prefix} Connection header: {{Connection}}",
-                        context.Request.Headers[Constants.Http.ConnectionHeader]);
-                }
+                    if (context.Request.Headers.ContainsKey(Constants.Http.ConnectionHeader))
+                    {
+                        _logger.LogDebug($"{Constants.Diagnostics.Prefix} Connection header: {{Connection}}",
+                            context.Request.Headers[Constants.Http.ConnectionHeader]);
+                    }
 
-                try
-                {
-                    await next();
-                    _logger.LogInformation($"{Constants.Diagnostics.Prefix} Response {{StatusCode}} for {{Path}}",
-                        context.Response.StatusCode, context.Request.Path);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, $"{Constants.Diagnostics.Prefix} Exception during request {{Path}}: {{Message}}",
-                        context.Request.Path, ex.Message);
-                    throw;
-                }
-            });
+                    try
+                    {
+                        await next();
+                        _logger.LogDebug($"{Constants.Diagnostics.Prefix} Response {{StatusCode}} for {{Path}}",
+                            context.Response.StatusCode, context.Request.Path);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, $"{Constants.Diagnostics.Prefix} Exception during request {{Path}}: {{Message}}",
+                            context.Request.Path, ex.Message);
+                        throw;
+                    }
+                });
+            }
 
             // Map static assets including _framework/blazor.web.js.
             // Required in .NET 9+ where framework JS is served via endpoint routing, not UseStaticFiles.
@@ -507,7 +512,7 @@ public class EmbeddedBlazorHostService : IBlazorHostService, IDisposable
 
         _logger.LogInformation("Waiting for Blazor host to become available at {BaseUrl}...", BaseUrl);
 
-        using var httpClient = HttpClientFactory.CreateForServerCheck();
+        using var httpClient = BlazorServerProbe.CreateForServerCheck();
 
         int attemptCount = 0;
         while (!cancellationToken.IsCancellationRequested)
@@ -543,15 +548,31 @@ public class EmbeddedBlazorHostService : IBlazorHostService, IDisposable
         _logger.LogWarning("WaitForStartupAsync cancelled");
     }
 
-    public void Dispose()
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
     {
         if (IsRunning)
         {
-            StopAsync().GetAwaiter().GetResult();
+            await StopAsync();
         }
 
         _hostCts?.Dispose();
-        _app?.DisposeAsync().GetAwaiter().GetResult();
+
+        if (_app != null)
+        {
+            await _app.DisposeAsync();
+            _app = null;
+        }
+    }
+
+    /// <summary>
+    /// Synchronous dispose: invokes <see cref="DisposeAsync"/> on the thread-pool to avoid
+    /// blocking an async context. Prefer <c>await using</c> / <see cref="DisposeAsync"/> where possible.
+    /// </summary>
+    public void Dispose()
+    {
+        _logger.LogDebug("Synchronous Dispose called on EmbeddedBlazorHostService — prefer DisposeAsync");
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     private int FindAvailablePort(int startPort)
