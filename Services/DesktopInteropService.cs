@@ -12,9 +12,9 @@ public class DesktopInteropService : IDesktopInteropService
 {
     private readonly IJSRuntime _jsRuntime;
     private readonly DiagnosticLogger _logger;
-    private readonly PhotinoMessageHandler _messageHandler;
+    private readonly WebViewMessageHandler _messageHandler;
 
-    public DesktopInteropService(IJSRuntime jsRuntime, IDiagnosticLoggerFactory loggerFactory, PhotinoMessageHandler messageHandler)
+    public DesktopInteropService(IJSRuntime jsRuntime, IDiagnosticLoggerFactory loggerFactory, WebViewMessageHandler messageHandler)
     {
         _jsRuntime = jsRuntime;
         _logger = loggerFactory.CreateLogger<DesktopInteropService>();
@@ -98,7 +98,7 @@ public class DesktopInteropService : IDesktopInteropService
         return new ValueTask<bool>(File.Exists(path));
     }
 
-    // Window Operations - Use PhotinoMessageHandler to control the Photino window
+    // Window Operations - Use WebViewMessageHandler to control the host window
     public ValueTask MinimizeWindowAsync()
     {
         _messageHandler.MinimizeWindow();

@@ -15,7 +15,7 @@ namespace CheapAvaloniaBlazor.Services;
 public class SystemTrayService : ISystemTrayService
 {
     private readonly CheapAvaloniaBlazorOptions _options;
-    private readonly PhotinoMessageHandler _messageHandler;
+    private readonly WebViewMessageHandler _messageHandler;
     private readonly ILogger<SystemTrayService>? _logger;
 
     private TrayIcon? _trayIcon;
@@ -32,7 +32,7 @@ public class SystemTrayService : ISystemTrayService
 
     public SystemTrayService(
         CheapAvaloniaBlazorOptions options,
-        PhotinoMessageHandler messageHandler,
+        WebViewMessageHandler messageHandler,
         ILogger<SystemTrayService>? logger = null)
     {
         _options = options;
@@ -132,11 +132,7 @@ public class SystemTrayService : ISystemTrayService
     {
         _logger?.LogDebug("Minimizing to tray");
 
-        // KNOWN ISSUE: When EnableDevTools is true, Photino keeps the taskbar icon visible
-        // even after the window is hidden. This is a Photino/WebView2 limitation - the DevTools
-        // window maintains the taskbar presence. Disable EnableDevTools for clean tray-only behavior.
-
-        // Hide the Photino window completely (not just minimize to taskbar)
+        // Hide the window completely (not just minimize to taskbar)
         if (!_messageHandler.HideWindow())
         {
             // Fallback to minimize if hide not supported on this platform
@@ -152,7 +148,7 @@ public class SystemTrayService : ISystemTrayService
     {
         _logger?.LogDebug("Restoring from tray");
 
-        // Show the hidden Photino window and bring to foreground
+        // Show the hidden window and bring to foreground
         if (!_messageHandler.ShowWindowFromHidden())
         {
             // Fallback to restore if show not supported

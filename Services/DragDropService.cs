@@ -6,8 +6,8 @@ namespace CheapAvaloniaBlazor.Services;
 
 /// <summary>
 /// Singleton orchestrator for file drag-and-drop events.
-/// Registers handlers with <see cref="PhotinoMessageHandler"/> for JavaScript drag events
-/// bridged via the Photino message channel (<c>window.chrome.webview.postMessage</c>).
+/// Registers handlers with <see cref="WebViewMessageHandler"/> for JavaScript drag events
+/// bridged via <c>invokeCSharpAction</c>.
 /// </summary>
 internal sealed class DragDropService : IDragDropService
 {
@@ -18,7 +18,7 @@ internal sealed class DragDropService : IDragDropService
     public event Action? DragLeave;
     public bool IsDragOver { get; private set; }
 
-    public DragDropService(PhotinoMessageHandler messageHandler, ILogger<DragDropService> logger)
+    public DragDropService(WebViewMessageHandler messageHandler, ILogger<DragDropService> logger)
     {
         _logger = logger;
 

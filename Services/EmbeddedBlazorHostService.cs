@@ -320,7 +320,7 @@ public class EmbeddedBlazorHostService : IBlazorHostService, IDisposable
             // ============================================================================
             _logger.LogDebug("Applying runtime instance overrides for shared singletons...");
 
-            var messageHandler = CheapAvaloniaBlazorRuntime.GetRequiredService<PhotinoMessageHandler>();
+            var messageHandler = CheapAvaloniaBlazorRuntime.GetRequiredService<WebViewMessageHandler>();
             services.AddSingleton(messageHandler);
 
             var loggerFactory = CheapAvaloniaBlazorRuntime.GetRequiredService<IDiagnosticLoggerFactory>();

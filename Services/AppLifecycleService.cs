@@ -4,8 +4,8 @@ using Microsoft.Extensions.Logging;
 namespace CheapAvaloniaBlazor.Services;
 
 /// <summary>
-/// Singleton service that tracks Photino window lifecycle state and fires events.
-/// Internal On* methods are called by BlazorHostWindow when Photino events fire.
+/// Singleton service that tracks host window lifecycle state and fires events.
+/// Internal On* methods are called by BlazorHostWindow when Avalonia window events fire.
 /// </summary>
 public class AppLifecycleService : IAppLifecycleService
 {
@@ -18,7 +18,7 @@ public class AppLifecycleService : IAppLifecycleService
     public event Action? Activated;
     public event Action? Deactivated;
 
-    // volatile: state is written on Photino thread, read on Blazor render thread
+    // volatile: state is written on the UI thread, read on Blazor render thread
     private volatile bool _isMinimized;
     private volatile bool _isMaximized;
     private volatile bool _isFocused;
@@ -33,7 +33,7 @@ public class AppLifecycleService : IAppLifecycleService
     }
 
     /// <summary>
-    /// Called by BlazorHostWindow when the Photino window is about to close.
+    /// Called by BlazorHostWindow when the window is about to close.
     /// Returns true if any subscriber cancelled the close.
     /// </summary>
     internal bool OnClosing()
@@ -50,7 +50,7 @@ public class AppLifecycleService : IAppLifecycleService
     }
 
     /// <summary>
-    /// Called by BlazorHostWindow when the Photino window is minimized
+    /// Called by BlazorHostWindow when the window is minimized.
     /// </summary>
     internal void OnMinimized()
     {
@@ -60,7 +60,7 @@ public class AppLifecycleService : IAppLifecycleService
     }
 
     /// <summary>
-    /// Called by BlazorHostWindow when the Photino window is maximized
+    /// Called by BlazorHostWindow when the window is maximized.
     /// </summary>
     internal void OnMaximized()
     {
@@ -71,7 +71,7 @@ public class AppLifecycleService : IAppLifecycleService
     }
 
     /// <summary>
-    /// Called by BlazorHostWindow when the Photino window is restored
+    /// Called by BlazorHostWindow when the window is restored.
     /// </summary>
     internal void OnRestored()
     {
@@ -82,7 +82,7 @@ public class AppLifecycleService : IAppLifecycleService
     }
 
     /// <summary>
-    /// Called by BlazorHostWindow when the Photino window gains focus
+    /// Called by BlazorHostWindow when the window gains focus.
     /// </summary>
     internal void OnActivated()
     {
@@ -92,7 +92,7 @@ public class AppLifecycleService : IAppLifecycleService
     }
 
     /// <summary>
-    /// Called by BlazorHostWindow when the Photino window loses focus
+    /// Called by BlazorHostWindow when the window loses focus.
     /// </summary>
     internal void OnDeactivated()
     {

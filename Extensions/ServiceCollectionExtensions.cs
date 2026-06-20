@@ -37,7 +37,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IBlazorHostService, EmbeddedBlazorHostService>();
 
         services.AddSingleton<IDiagnosticLoggerFactory, DiagnosticLoggerFactory>();
-        services.AddSingleton<PhotinoMessageHandler>();
+        services.AddSingleton<WebViewMessageHandler>();
         services.AddSingleton<ISystemTrayService, SystemTrayService>();
         services.AddSingleton<INotificationService, NotificationService>();
         services.AddFileSettingsService(settingsOpts =>

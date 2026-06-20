@@ -6,16 +6,16 @@ using Avalonia.Threading;
 using CheapAvaloniaBlazor.Configuration;
 using CheapAvaloniaBlazor.Services;
 using CheapAvaloniaBlazor.Utilities;
-using Microsoft.Extensions.DependencyInjection;
-using Photino.NET;
+
+using AvaloniaWindowState = Avalonia.Controls.WindowState;
 
 namespace CheapAvaloniaBlazor.Windows;
 
 /// <summary>
-/// Main window that hosts the Blazor application
+/// Main window that hosts the Blazor application inside an embedded NativeWebView.
 /// </summary>
 /// <remarks>
-/// Marked as partial for future splash screen expansion with XAML code-behind
+/// Marked as partial for future splash screen expansion with XAML code-behind.
 /// </remarks>
 public partial class BlazorHostWindow : Window, IBlazorWindow
 {
@@ -23,9 +23,10 @@ public partial class BlazorHostWindow : Window, IBlazorWindow
     private readonly CheapAvaloniaBlazorOptions? _options;
     private readonly DiagnosticLogger? _logger;
 
+    private NativeWebView? _nativeWebView;
+
     public BlazorHostWindow()
     {
-
     }
 
     public BlazorHostWindow(IBlazorHostService? blazorHost = null)
@@ -58,7 +59,6 @@ public partial class BlazorHostWindow : Window, IBlazorWindow
         {
             _logger?.LogVerbose("Splash screen enabled - showing splash during startup");
 
-            // Configure window as visible splash screen
             Title = splashConfig!.Title;
             Width = splashConfig.Width;
             Height = splashConfig.Height;
@@ -70,30 +70,19 @@ public partial class BlazorHostWindow : Window, IBlazorWindow
             Opacity = 1;
             WindowDecorations = Avalonia.Controls.WindowDecorations.None;
 
-            // Set splash content
             Content = splashConfig.CustomContentFactory?.Invoke() ?? splashConfig.CreateDefaultContent();
 
             _logger?.LogVerbose($"Splash screen configured: {splashConfig.Width}x{splashConfig.Height}");
         }
         else
         {
-            _logger?.LogVerbose("Splash screen disabled - hiding Avalonia window");
+            _logger?.LogVerbose("Splash screen disabled - window will show with NativeWebView directly");
 
-            // Configure window to be completely hidden but functional for StorageProvider
-            Title = Constants.Framework.Name;
-            Width = Constants.Defaults.MinimumWindowSize;
-            Height = Constants.Defaults.MinimumWindowSize;
-            MinWidth = Constants.Defaults.MinimumWindowSize;
-            MinHeight = Constants.Defaults.MinimumWindowSize;
-            Position = new Avalonia.PixelPoint(Constants.Defaults.OffScreenPosition, Constants.Defaults.OffScreenPosition);
-            WindowStartupLocation = WindowStartupLocation.Manual;
-            CanResize = false;
-            ShowInTaskbar = false;
-            Opacity = 0;
-            WindowDecorations = Avalonia.Controls.WindowDecorations.None;
-            TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.Transparent };
-
-            _logger?.LogVerbose("Avalonia window configured as hidden (no decorations, transparent, off-screen)");
+            Title = _options?.DefaultWindowTitle ?? Constants.Framework.Name;
+            Width = _options?.DefaultWindowWidth ?? Constants.Defaults.MinimumWindowSize;
+            Height = _options?.DefaultWindowHeight ?? Constants.Defaults.MinimumWindowSize;
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            ShowInTaskbar = true;
         }
 
         _logger?.LogVerbose("Subscribing to Loaded event");
@@ -104,9 +93,34 @@ public partial class BlazorHostWindow : Window, IBlazorWindow
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
-        // Don't interfere with cleanup - let the Photino window handle shutdown
-        // The Avalonia window is just a bootstrap and should close cleanly
+        var lifecycleService = CheapAvaloniaBlazorRuntime.GetService<IAppLifecycleService>() as AppLifecycleService;
+        if (lifecycleService?.OnClosing() == true)
+        {
+            _logger?.LogVerbose("Window close cancelled by lifecycle subscriber");
+            e.Cancel = true;
+            return;
+        }
+
+        if (_options?.CloseToTray == true)
+        {
+            var trayService = CheapAvaloniaBlazorRuntime.GetService<ISystemTrayService>();
+            if (trayService != null)
+            {
+                _logger?.LogVerbose("Window closing - minimizing to tray instead");
+                e.Cancel = true;
+                trayService.MinimizeToTray();
+                return;
+            }
+        }
+
+        _logger?.LogVerbose("Window closing - shutting down application");
         base.OnClosing(e);
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime lifetime)
+                lifetime.Shutdown();
+        });
     }
 
     private async void OnWindowLoaded(object? sender, RoutedEventArgs e)
@@ -115,189 +129,120 @@ public partial class BlazorHostWindow : Window, IBlazorWindow
 
         try
         {
-            // Initialize Photino using the direct approach
-            await InitializePhotino();
+            await InitializeWebView();
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error initializing Photino: {ErrorMessage}", ex.Message);
+            _logger?.LogError(ex, "Error initializing web view: {ErrorMessage}", ex.Message);
             if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-            {
                 desktop.Shutdown();
-            }
         }
     }
 
-    private async Task InitializePhotino()
+    private async Task InitializeWebView()
     {
         if (!GuardClauses.RequireServices(_logger, _blazorHost, _options))
             return;
 
-        _logger?.LogVerbose("InitializePhotino - Using direct Photino + Avalonia StorageProvider approach");
+        _logger?.LogVerbose("InitializeWebView - starting Blazor host");
 
-        // Start Blazor host if not running
         if (!_blazorHost.IsRunning)
         {
             _logger?.LogVerbose("Starting Blazor host...");
             await _blazorHost.StartAsync();
         }
 
-        // Wait for the server to be fully ready
         var baseUrl = _blazorHost.BaseUrl;
-        _logger?.LogVerbose($"Blazor server URL: {baseUrl}");
+        _logger?.LogVerbose("Blazor server URL: {BaseUrl}", baseUrl);
 
-        // Test the server connectivity
         await WaitForServerReady(baseUrl);
 
-        // Hide splash screen and transition to hidden storage provider mode
-        _logger?.LogVerbose("Server ready - hiding splash screen and transitioning to hidden mode");
-        HideSplashScreen();
-        _logger?.LogVerbose("Avalonia window transitioned to hidden mode - available for StorageProvider");
-
-        // Create Photino window directly
-        _logger?.LogVerbose("Creating Photino window...");
-        var photinoWindow = new PhotinoWindow()
-            .SetTitle(_options.DefaultWindowTitle)
-            .SetSize(_options.DefaultWindowWidth, _options.DefaultWindowHeight)
-            .SetMinSize(Constants.Defaults.MinimumResizableWidth, Constants.Defaults.MinimumResizableHeight)
-            .SetResizable(_options.Resizable)
-            .SetTopMost(false)
-            .SetUseOsDefaultSize(false)
-            .SetUseOsDefaultLocation(false)  // Prevent OS from positioning window
-            .SetDevToolsEnabled(_options.EnableDevTools)
-            .SetContextMenuEnabled(_options.EnableContextMenu)
-            // Control Photino's native console logging based on console logging preference
-            // LogVerbosity: 0=Critical only, 1=+Warnings, 2=Verbose (default), >2=All
-            // Use level 1 (warnings) when disabled to still catch important issues
-            .SetLogVerbosity(_options.EnableConsoleLogging ? 2 : 1);
-
-        // ALWAYS center the window on each launch to prevent Windows from caching position
-        // This ensures the window appears in the center, not in a saved position from previous runs
-        _logger?.LogVerbose("Centering Photino window (prevents position caching)...");
-        photinoWindow.Center();
-
-        _logger?.LogVerbose($"Loading Photino window with URL: {baseUrl}");
-        photinoWindow.Load(baseUrl);
-
-        // Bring Photino window to foreground by temporarily setting it as TopMost
-        // This ensures the window appears in front instead of staying hidden in taskbar
-        _logger?.LogVerbose("Bringing Photino window to foreground...");
-        photinoWindow.SetTopMost(true);
-
-        // Small delay to ensure the window is actually shown
-        await Task.Delay(Constants.Defaults.WindowBringToFrontDelayMilliseconds);
-
-        // Remove TopMost flag so window behaves normally
-        photinoWindow.SetTopMost(false);
-        _logger?.LogVerbose("Photino window brought to foreground");
-
-        // Attach message handler for JavaScript ↔ C# communication
-        var messageHandler = CheapAvaloniaBlazorRuntime.GetRequiredService<PhotinoMessageHandler>();
-        messageHandler.AttachToWindow(photinoWindow);
-
-        // Attach cookie service so it can read cookies from the WebView
-        if (CheapAvaloniaBlazorRuntime.GetRequiredService<ICookieService>() is CookieService cookieService)
+        // Transition splash → real window, or apply sizing when no splash was used
+        var splashConfig = _options?.SplashScreen;
+        if (splashConfig?.Enabled == true)
         {
-            cookieService.AttachToWindow(photinoWindow);
+            _logger?.LogVerbose("Server ready - transitioning from splash to main window");
+            Title = _options.DefaultWindowTitle;
+            Width = _options.DefaultWindowWidth;
+            Height = _options.DefaultWindowHeight;
+            MinWidth = Constants.Defaults.MinimumResizableWidth;
+            MinHeight = Constants.Defaults.MinimumResizableHeight;
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            CanResize = _options.Resizable;
+            ShowInTaskbar = true;
+            Opacity = 1;
+            // Restore full window chrome after the splash was shown borderless
+            WindowDecorations = Avalonia.Controls.WindowDecorations.Full;
+        }
+        else
+        {
+            MinWidth = Constants.Defaults.MinimumResizableWidth;
+            MinHeight = Constants.Defaults.MinimumResizableHeight;
+            CanResize = _options.Resizable;
         }
 
-        // Wire up lifecycle service to Photino window events
-        var lifecycleService = CheapAvaloniaBlazorRuntime.GetRequiredService<IAppLifecycleService>()
-            as AppLifecycleService;
+        // Create and embed the NativeWebView
+        _logger?.LogVerbose("Creating NativeWebView...");
+        _nativeWebView = new NativeWebView
+        {
+            Source = new Uri(baseUrl)
+        };
 
+        Content = _nativeWebView;
+
+        // Attach message handler for JavaScript <-> C# communication
+        var messageHandler = CheapAvaloniaBlazorRuntime.GetRequiredService<WebViewMessageHandler>();
+        messageHandler.AttachToWindow(_nativeWebView, this);
+
+        // Attach cookie service
+        if (CheapAvaloniaBlazorRuntime.GetRequiredService<ICookieService>() is CookieService cookieService)
+            cookieService.AttachToWebView(_nativeWebView);
+
+        // Wire lifecycle service to window property changes (Avalonia uses PropertyChanged, not a dedicated event)
+        var lifecycleService = CheapAvaloniaBlazorRuntime.GetRequiredService<IAppLifecycleService>() as AppLifecycleService;
         if (lifecycleService is null)
         {
             _logger?.LogWarning("IAppLifecycleService is not AppLifecycleService - lifecycle events will not fire");
         }
         else
         {
-            photinoWindow.WindowMinimized += (s, e) => lifecycleService.OnMinimized();
-            photinoWindow.WindowMaximized += (s, e) => lifecycleService.OnMaximized();
-            photinoWindow.WindowRestored += (s, e) => lifecycleService.OnRestored();
-            photinoWindow.WindowFocusIn += (s, e) => lifecycleService.OnActivated();
-            photinoWindow.WindowFocusOut += (s, e) => lifecycleService.OnDeactivated();
+            PropertyChanged += (_, args) =>
+            {
+                if (args.Property == WindowStateProperty)
+                {
+                    switch (WindowState)
+                    {
+                        case AvaloniaWindowState.Minimized:
+                            lifecycleService.OnMinimized();
+                            break;
+                        case AvaloniaWindowState.Maximized:
+                            lifecycleService.OnMaximized();
+                            break;
+                        case AvaloniaWindowState.Normal:
+                            lifecycleService.OnRestored();
+                            break;
+                    }
+                }
+            };
+            Activated += (_, _) => lifecycleService.OnActivated();
+            Deactivated += (_, _) => lifecycleService.OnDeactivated();
         }
 
-        // Initialize native menu bar after native window is created (Windows only).
-        // WindowHandle is not available until WaitForClose() creates the native window,
-        // so we use RegisterWindowCreatedHandler which fires after the HWND exists.
-        // (RegisterWindowCreatingHandler fires BEFORE creation — too early, handle not available yet.)
+        // Initialize native menu bar with the platform handle once the visual tree is attached
         var menuBarService = CheapAvaloniaBlazorRuntime.GetRequiredService<IMenuBarService>() as MenuBarService;
         if (menuBarService is not null)
         {
-            photinoWindow.RegisterWindowCreatedHandler((s, e) =>
-            {
-                menuBarService.Initialize(photinoWindow.WindowHandle, _options?.MenuBarItems);
-            });
+            var platformHandle = TryGetPlatformHandle();
+            if (platformHandle is not null)
+                menuBarService.Initialize(platformHandle.Handle, _options?.MenuBarItems);
         }
 
-        // Register main window with WindowService for multi-window support.
-        // Child windows are created via mainWindow.Invoke() and need the PhotinoWindow reference.
+        // Register this window with WindowService for multi-window support
         var windowService = CheapAvaloniaBlazorRuntime.GetRequiredService<IWindowService>() as WindowService;
-        if (windowService is not null)
-        {
-            photinoWindow.RegisterWindowCreatedHandler((s, e) =>
-            {
-                windowService.RegisterMainWindow(photinoWindow);
-            });
-        }
+        windowService?.RegisterMainWindow(this, _nativeWebView);
 
-        // Register window closing handler
-        photinoWindow.WindowClosing += (sender, args) =>
-        {
-            // Let lifecycle subscribers cancel the close first
-            if (lifecycleService?.OnClosing() == true)
-            {
-                _logger?.LogVerbose("Photino window close cancelled by lifecycle subscriber");
-                return true; // A subscriber cancelled the close
-            }
-
-            // Check if close-to-tray is enabled
-            if (_options.CloseToTray)
-            {
-                _logger?.LogVerbose("Photino window closing - minimizing to tray instead");
-                var trayService = CheapAvaloniaBlazorRuntime.GetService<ISystemTrayService>();
-                if (trayService != null)
-                {
-                    trayService.MinimizeToTray();
-                    return true; // Cancel the close, minimize to tray instead
-                }
-            }
-
-            _logger?.LogVerbose("Photino window closing - shutting down application");
-            Dispatcher.UIThread.Post(() =>
-            {
-                if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime lifetime)
-                {
-                    lifetime.Shutdown();
-                }
-            });
-            return false; // Allow window to close
-        };
-
-        _logger?.LogVerbose("About to call WaitForClose - direct approach");
-
-        // Direct blocking call - simple and reliable
-        photinoWindow.WaitForClose();
-        _logger?.LogVerbose("WaitForClose completed");
-    }
-
-
-    private void HideSplashScreen()
-    {
-        // Transition Avalonia window to hidden mode for StorageProvider
-        Width = Constants.Defaults.MinimumWindowSize;
-        Height = Constants.Defaults.MinimumWindowSize;
-        MinWidth = Constants.Defaults.MinimumWindowSize;
-        MinHeight = Constants.Defaults.MinimumWindowSize;
-        Position = new Avalonia.PixelPoint(Constants.Defaults.OffScreenPosition, Constants.Defaults.OffScreenPosition);
-        ShowInTaskbar = false;
-        Opacity = 0;
-        WindowDecorations = Avalonia.Controls.WindowDecorations.None;
-        TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.Transparent };
-
-        // Clear content to free memory
-        Content = null;
+        _logger?.LogVerbose("NativeWebView created and all services wired up");
+        Activate();
     }
 
     private async Task WaitForServerReady(string baseUrl)
@@ -313,7 +258,6 @@ public partial class BlazorHostWindow : Window, IBlazorWindow
                 if (response.IsSuccessStatusCode)
                 {
                     _logger?.LogVerbose("Server is ready!");
-                    // Extra delay to ensure the server is fully stabilized
                     await Task.Delay(Constants.Defaults.ServerStabilizationDelayMilliseconds);
                     _logger?.LogVerbose("Server stabilization delay completed");
                     return;
@@ -324,7 +268,6 @@ public partial class BlazorHostWindow : Window, IBlazorWindow
                 _logger?.LogVerbose($"Server not ready yet: {ex.Message}");
             }
 
-
             await Task.Delay(Constants.Defaults.ServerReadinessCheckDelayMilliseconds);
         }
 
@@ -332,21 +275,21 @@ public partial class BlazorHostWindow : Window, IBlazorWindow
     }
 
     /// <summary>
-    /// Show the window as a dialog (explicit interface implementation to match nullable signature)
+    /// Show the window as a dialog (explicit interface implementation to match nullable signature).
     /// </summary>
-    /// <param name="owner">The owner window (nullable to match interface contract)</param>
+    /// <param name="owner">The owner window (nullable to match interface contract).</param>
     async Task IBlazorWindow.ShowDialog(Window? owner)
     {
         await base.ShowDialog(owner!);
     }
 
     /// <summary>
-    /// Run the window and start the application (interface implementation)
+    /// Run the window and start the application (interface implementation).
     /// </summary>
     public void Run()
     {
-        // The Avalonia window initialization will trigger OnWindowLoaded
-        // which will then create and run the Photino window directly
-        // This method satisfies the interface requirement
+        // The Avalonia window initialization triggers OnWindowLoaded,
+        // which creates the NativeWebView and wires up all services.
+        // This method satisfies the interface requirement.
     }
 }

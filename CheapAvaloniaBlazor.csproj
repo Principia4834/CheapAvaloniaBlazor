@@ -14,7 +14,7 @@
     <Description>Stable Blazor desktop framework with professional splash screen, static-web-asset JavaScript bridge, and clean file management</Description>
     <PackageProjectUrl>https://github.com/CheapNud/CheapAvaloniaBlazor</PackageProjectUrl>
     <RepositoryUrl>https://github.com/CheapNud/CheapAvaloniaBlazor</RepositoryUrl>
-    <PackageTags>blazor;avalonia;photino;desktop;mudblazor;cross-platform;webview;splash-screen</PackageTags>
+    <PackageTags>blazor;avalonia;desktop;mudblazor;cross-platform;webview;nativewebview;splash-screen</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageReleaseNotes>Version 3.2.0 - The JS bridge now serves as a real static web asset at _content/CheapAvaloniaBlazor/cheap-blazor-interop.js: the packaged build props previously dropped the SDK-generated static web assets registration (NU5118), so that path returned 404 from packaged consumers. JavaScriptBridgeExtractor and the embedded-resource serving fallbacks are removed; public classes PrefixedEmbeddedFileProvider and EmbeddedResourceFileInfo are gone and the extracted root-path copy (/cheap-blazor-interop.js) no longer exists - reference the _content path, which all templates and docs already use (breaking). blazor.web.js extraction now picks the cache version matching the app's runtime and refreshes stale copies after a .NET update. Static files serve correctly regardless of the launch working directory. New xUnit test suite guards the packaging wiring.</PackageReleaseNotes>
@@ -44,8 +44,8 @@
     <PackageReference Include="Avalonia.Desktop" Version="12.0.4" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.4" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.4" />
+    <PackageReference Include="Avalonia.Controls.WebView" Version="12.0.1" />
     <PackageReference Include="MudBlazor" Version="9.5.0" />
-    <PackageReference Include="Photino.NET" Version="4.0.16" />
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.1" />
     <!-- Framework Reference for Blazor Server (provides Components.Web, Hosting, FileProviders) -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

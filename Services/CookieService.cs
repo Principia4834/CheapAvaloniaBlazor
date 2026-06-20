@@ -1,33 +1,16 @@
+using Avalonia.Controls;
 using Microsoft.Extensions.Logging;
-using Photino.NET;
 
 namespace CheapAvaloniaBlazor.Services;
 
 /// <summary>
-/// Extracts cookies from the underlying WebView's cookie store.
-///
-/// CheapAvaloniaBlazor sits on top of Photino.NET, which wraps the platform's
-/// native WebView (WebView2 on Windows, WebKitGTK on Linux, WKWebView on macOS).
-/// Each platform has its own cookie manager API:
-///
-///   Windows:  ICoreWebView2CookieManager.GetCookiesAsync()
-///   Linux:    WebKitCookieManager (webkit_cookie_manager_get_cookies)
-///   macOS:    WKHTTPCookieStore.getAllCookies()
-///
-/// Photino.NET does NOT currently expose any of these. This service is the
-/// CheapAvaloniaBlazor abstraction layer — once Photino adds cookie access
-/// (via a GetCookies method or a CookieManager property), this implementation
-/// simply delegates to it.
-///
-/// Until then, the JS-based fallback handles non-HttpOnly cookies.
-/// For HttpOnly cookies (like cf_clearance), use FlareSolverr as a sidecar.
-///
-/// Tracking: https://github.com/nickcox/photino/issues — request cookie API
+/// Extracts and manages cookies via the Avalonia NativeWebView cookie manager.
+/// Wraps <see cref="NativeWebViewCookieManager"/> returned by <see cref="NativeWebView.TryGetCookieManager"/>.
 /// </summary>
 public class CookieService : ICookieService
 {
     private readonly ILogger<CookieService>? _logger;
-    private PhotinoWindow? _mainWindow;
+    private NativeWebView? _webView;
 
     public CookieService(ILogger<CookieService>? logger = null)
     {
@@ -35,41 +18,53 @@ public class CookieService : ICookieService
     }
 
     /// <summary>
-    /// Called by BlazorHostWindow after the Photino window is created.
+    /// Called by BlazorHostWindow after the NativeWebView is created.
     /// </summary>
-    internal void AttachToWindow(PhotinoWindow window)
+    internal void AttachToWebView(NativeWebView webView)
     {
-        _mainWindow = window;
-        _logger?.LogInformation("CookieService attached to Photino window");
+        _webView = webView;
+        _logger?.LogInformation("CookieService attached to NativeWebView");
     }
 
     /// <inheritdoc />
-    public Task<Dictionary<string, string>> GetCookiesAsync(string uri)
+    public async Task<Dictionary<string, string>> GetCookiesAsync(string uri)
     {
-        if (_mainWindow is null)
+        if (_webView is null)
         {
-            _logger?.LogWarning("No Photino window attached — cannot extract cookies");
-            return Task.FromResult<Dictionary<string, string>>([]);
+            _logger?.LogWarning("No NativeWebView attached — cannot extract cookies");
+            return [];
         }
 
-        // ─── Photino native cookie API (not yet available) ───────────────────
-        //
-        // When Photino.NET adds cookie access, this becomes:
-        //
-        //   var nativeCookies = await _mainWindow.GetCookiesAsync(uri);
-        //   return nativeCookies.ToDictionary(c => c.Name, c => c.Value);
-        //
-        // This would work cross-platform — Photino routes to the native
-        // WebView's cookie store (WebView2, WebKitGTK, or WKWebView).
-        // ─────────────────────────────────────────────────────────────────────
+        var cookieManager = _webView.TryGetCookieManager();
+        if (cookieManager is null)
+        {
+            _logger?.LogWarning("Cookie manager not available yet. URI: {Uri}", uri);
+            return [];
+        }
 
-        // Fallback: JS-based extraction (non-HttpOnly cookies only).
-        // cf_clearance is typically HttpOnly, so this won't catch it.
-        // Use FlareSolverr for production CF bypass until Photino exposes cookies.
-        _logger?.LogDebug("GetCookiesAsync: Photino does not expose cookie manager yet. " +
-            "Returning empty — use FlareSolverr for HttpOnly cookie extraction. URI: {Uri}", uri);
+        try
+        {
+            // GetCookiesAsync returns all cookies; filter by the requested URI's host
+            var allCookies = await cookieManager.GetCookiesAsync();
 
-        return Task.FromResult<Dictionary<string, string>>([]);
+            if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsedUri))
+            {
+                // If URI is invalid, return all cookies
+                return allCookies?.ToDictionary(c => c.Name, c => c.Value) ?? [];
+            }
+
+            var host = parsedUri.Host;
+            return allCookies?
+                .Where(c => string.IsNullOrEmpty(c.Domain)
+                    || host.EndsWith(c.Domain.TrimStart('.'), StringComparison.OrdinalIgnoreCase))
+                .ToDictionary(c => c.Name, c => c.Value)
+                ?? [];
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to get cookies for URI: {Uri}", uri);
+            return [];
+        }
     }
 
     /// <inheritdoc />
@@ -80,10 +75,45 @@ public class CookieService : ICookieService
     }
 
     /// <inheritdoc />
-    public Task DeleteCookiesAsync(string domain)
+    public async Task DeleteCookiesAsync(string domain)
     {
-        // Requires Photino cookie manager — not yet available
-        _logger?.LogWarning("DeleteCookiesAsync: Photino does not expose cookie manager yet");
-        return Task.CompletedTask;
+        if (_webView is null)
+        {
+            _logger?.LogWarning("No NativeWebView attached — cannot delete cookies");
+            return;
+        }
+
+        var cookieManager = _webView.TryGetCookieManager();
+        if (cookieManager is null)
+        {
+            _logger?.LogWarning("Cookie manager not available — cannot delete cookies for domain: {Domain}", domain);
+            return;
+        }
+
+        try
+        {
+            // Get all cookies for the domain, then delete them individually
+            var allCookies = await cookieManager.GetCookiesAsync();
+            if (allCookies is null) return;
+
+            var targetDomain = domain.TrimStart('.');
+            int deleted = 0;
+            foreach (var cookie in allCookies)
+            {
+                var cookieDomain = cookie.Domain.TrimStart('.');
+                if (cookieDomain.EndsWith(targetDomain, StringComparison.OrdinalIgnoreCase)
+                    || targetDomain.EndsWith(cookieDomain, StringComparison.OrdinalIgnoreCase))
+                {
+                    cookieManager.DeleteCookie(cookie.Name, cookie.Domain, cookie.Path);
+                    deleted++;
+                }
+            }
+
+            _logger?.LogDebug("Deleted {Count} cookies for domain: {Domain}", deleted, domain);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to delete cookies for domain: {Domain}", domain);
+        }
     }
 }

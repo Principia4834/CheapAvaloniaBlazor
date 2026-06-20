@@ -35,17 +35,19 @@ window.cheapBlazor = {
         }
     },
 
-    // File drag-and-drop handling via Photino message channel.
+    // File drag-and-drop handling via the Avalonia NativeWebView message channel.
     // Uses a drag counter to handle spurious dragenter/dragleave from child elements.
-    // Capture-phase listeners on window to intercept before WebView2 internal handlers.
+    // Capture-phase listeners on window to intercept before native WebView handlers.
     // The postMsg helper is guarded — preventDefault() always runs regardless of messaging.
     setupFileDrop: function () {
         var dragCounter = 0;
 
+        // Avalonia NativeWebView: invokeCSharpAction(body) sends a message to C#.
+        // The body must be a plain string; we JSON-encode our envelope here.
         var postMsg = function (type, payload) {
             try {
-                if (window.chrome && window.chrome.webview) {
-                    window.chrome.webview.postMessage(JSON.stringify({
+                if (typeof invokeCSharpAction === 'function') {
+                    invokeCSharpAction(JSON.stringify({
                         type: type,
                         payload: payload || ''
                     }));
